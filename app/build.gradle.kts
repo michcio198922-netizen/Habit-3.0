@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "pl.nawyki.app"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "pl.nawyki.app"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
     }
