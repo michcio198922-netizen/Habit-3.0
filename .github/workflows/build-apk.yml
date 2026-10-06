@@ -20,7 +20,7 @@ jobs:
           java-version: '17'
 
       - name: Ustaw Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Zainstaluj Android SDK 37
         run: |
