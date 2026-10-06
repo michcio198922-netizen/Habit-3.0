@@ -23,10 +23,7 @@ jobs:
       - name: Ustaw Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Zainstaluj Android SDK 36
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+      platforms;android-37.1
 
       - name: Ustaw Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v6
