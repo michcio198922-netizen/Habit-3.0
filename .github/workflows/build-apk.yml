@@ -3,7 +3,8 @@ name: Zbuduj APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - main
 
 jobs:
   build:
@@ -17,25 +18,25 @@ jobs:
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Ustaw Android SDK
         uses: android-actions/setup-android@v4
 
-    - name: Zainstaluj Android SDK 37
-  run: |
-    yes | sdkmanager --licenses >/dev/null || true
-    sdkmanager --channel=3 "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+      - name: Zainstaluj Android SDK 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Ustaw Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.6.0'
+          gradle-version: "9.6.0"
 
       - name: Zbuduj APK
         run: gradle :app:assembleDebug --stacktrace
 
-      - name: Udostępnij APK do pobrania
+      - name: Udostepnij APK
         uses: actions/upload-artifact@v4
         with:
           name: Nawyki-APK
