@@ -6,14 +6,14 @@ plugins {
 android {
     namespace = "pl.nawyki.app"
     compileSdk = 37
-compileSdkMinor = 1
+    compileSdkMinor = 1
 
     defaultConfig {
         applicationId = "pl.nawyki.app"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 37
+        versionCode = 6
+        versionName = "4.2"
     }
 
     buildFeatures {
@@ -27,6 +27,7 @@ dependencies {
     androidTestImplementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
