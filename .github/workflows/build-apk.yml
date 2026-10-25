@@ -23,8 +23,7 @@ jobs:
       - name: Ustaw Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Ustaw Android SDK
-  uses: android-actions/setup-android@v4
+      
 
 - name: Ustaw Gradle 9.6.0
   uses: gradle/actions/setup-gradle@v6
@@ -32,10 +31,6 @@ jobs:
     gradle-version: "9.6.0"
 
       - name: Ustaw Gradle 9.6.0
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "9.6.0"
-
       - name: Zbuduj APK
         run: gradle :app:assembleDebug --stacktrace
 
