@@ -937,7 +937,7 @@ private fun CalendarScreen(
         }
 
         if (habits.isEmpty()) {
-            item { EmptyState(false, "Dodaj nawyk w zakładce Nawyki") }
+            item { EmptyState("Brak nawyków", "Dodaj nawyk w zakładce Nawyki") }
         } else {
             items(count = habits.size, key = { index -> habits[index].id }) { index ->
                 val habit = habits[index]
