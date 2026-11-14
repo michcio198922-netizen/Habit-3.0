@@ -22,9 +22,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -75,6 +78,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
@@ -84,7 +88,7 @@ import kotlin.math.roundToInt
 private enum class HabitType { GOOD, BAD }
 private enum class HabitFilter { ALL, GOOD, BAD, UNMARKED }
 private enum class DailyStatus { SUCCESS, FAILURE }
-private enum class AppScreen { HABITS, STATS, CALENDAR, SETTINGS }
+private enum class AppScreen { HABITS, STATS, WEEKLY, CALENDAR, SETTINGS }
 
 private data class Habit(
     val id: Long,
@@ -98,11 +102,36 @@ private data class Habit(
 
 private data class StatusKey(val habitId: Long, val date: String)
 
+private data class WeeklyReview(
+    val weekStart: String,
+    val learned: String = "",
+    val improved: String = "",
+    val nextWeek: String = ""
+) {
+    val complete: Boolean
+        get() = learned.isNotBlank() && improved.isNotBlank() && nextWeek.isNotBlank()
+}
+
+private fun weekStartOf(date: LocalDate): LocalDate =
+    date.minusDays((date.dayOfWeek.value - DayOfWeek.MONDAY.value).toLong())
+
+// W niedzielę pytamy o kończący się tydzień; w pozostałe dni o ostatni zakończony tydzień.
+private fun dueWeekOf(today: LocalDate): LocalDate =
+    if (today.dayOfWeek == DayOfWeek.SUNDAY) weekStartOf(today)
+    else weekStartOf(today).minusWeeks(1)
+
+private fun weekLabel(monday: LocalDate): String {
+    val fmt = DateTimeFormatter.ofPattern("d MMM", Locale("pl", "PL"))
+    val end = monday.plusDays(6)
+    return "${monday.format(fmt)} – ${end.format(fmt)} ${end.year}"
+}
+
 private data class BackupData(
     val habits: List<Habit>,
     val statuses: Map<StatusKey, DailyStatus>,
     val notes: Map<String, String>,
-    val reminder: ReminderSettings
+    val reminder: ReminderSettings,
+    val weeklyReviews: Map<String, WeeklyReview>
 )
 
 data class ReminderSettings(
@@ -153,6 +182,9 @@ private fun HabitApp(context: Context) {
         mutableStateMapOf<String, String>().apply { putAll(repository.loadNotes()) }
     }
 
+    val weeklyReviews: SnapshotStateMap<String, WeeklyReview> = remember {
+        mutableStateMapOf<String, WeeklyReview>().apply { putAll(repository.loadWeeklyReviews()) }
+    }
     var reminderSettings by remember { mutableStateOf(repository.loadReminderSettings()) }
     var screen by remember { mutableStateOf(AppScreen.HABITS) }
     var filter by remember { mutableStateOf(HabitFilter.ALL) }
@@ -198,10 +230,13 @@ private fun HabitApp(context: Context) {
                 statuses.putAll(result.statuses)
                 notes.clear()
                 notes.putAll(result.notes)
+                weeklyReviews.clear()
+                weeklyReviews.putAll(result.weeklyReviews)
                 reminderSettings = result.reminder
                 repository.saveHabits(habits)
                 repository.saveStatuses(statuses)
                 repository.saveNotes(notes)
+                repository.saveWeeklyReviews(weeklyReviews)
                 repository.saveReminderSettings(reminderSettings)
                 HabitWidgetProvider.refresh(context)
                 backupMessage = "Backup wczytany."
@@ -210,6 +245,10 @@ private fun HabitApp(context: Context) {
     }
 
     val today = LocalDate.now()
+    val firstWeeklyWeek = remember { repository.loadOrCreateWeeklyStartWeek() }
+    val dueWeek = dueWeekOf(today)
+    val dueReview = weeklyReviews[dueWeek.toString()]
+    val weeklyReviewDue = !dueWeek.isBefore(firstWeeklyWeek) && dueReview?.complete != true
     val todayKey = today.toString()
     val activeHabits = habits.filter { !it.archived }
     val todayPlanned = activeHabits.filter { isScheduled(it, today) }
@@ -244,8 +283,9 @@ private fun HabitApp(context: Context) {
     }
 
     val topTitle = when (screen) {
-        AppScreen.HABITS -> "Nawyki 4.2"
+        AppScreen.HABITS -> "Nawyki 4.3"
         AppScreen.STATS -> "Statystyki"
+        AppScreen.WEEKLY -> "Podsumowanie tygodnia"
         AppScreen.CALENDAR -> "Kalendarz"
         AppScreen.SETTINGS -> "Ustawienia"
     }
@@ -253,6 +293,7 @@ private fun HabitApp(context: Context) {
     val topSubtitle = when (screen) {
         AppScreen.HABITS -> "Dzisiaj: $todaySuccess/$todayMarked sukcesów • plan ${todayPlanned.size}"
         AppScreen.STATS -> "Skuteczność, serie i trend 30 dni"
+        AppScreen.WEEKLY -> "3 pytania • Twoje wnioski i historia"
         AppScreen.CALENDAR -> "Wpisy i notatka do wybranego dnia"
         AppScreen.SETTINGS -> "Przypomnienia, archiwum i backup"
     }
@@ -290,6 +331,7 @@ private fun HabitApp(context: Context) {
                                 when (item) {
                                     AppScreen.HABITS -> "🏠"
                                     AppScreen.STATS -> "📊"
+                                    AppScreen.WEEKLY -> "📝"
                                     AppScreen.CALENDAR -> "📅"
                                     AppScreen.SETTINGS -> "⚙️"
                                 }
@@ -300,6 +342,7 @@ private fun HabitApp(context: Context) {
                                 when (item) {
                                     AppScreen.HABITS -> "Nawyki"
                                     AppScreen.STATS -> "Staty"
+                                    AppScreen.WEEKLY -> "Tydzień"
                                     AppScreen.CALENDAR -> "Kalendarz"
                                     AppScreen.SETTINGS -> "Opcje"
                                 }
@@ -322,6 +365,9 @@ private fun HabitApp(context: Context) {
                     today = today,
                     filter = filter,
                     onFilterChange = { filter = it },
+                    showWeeklyPrompt = weeklyReviewDue,
+                    reviewWeekLabel = weekLabel(dueWeek),
+                    onOpenWeeklyReview = { screen = AppScreen.WEEKLY },
                     onStatus = { habit, status ->
                         val key = StatusKey(habit.id, todayKey)
                         if (statuses[key] == status) statuses.remove(key) else statuses[key] = status
@@ -339,6 +385,16 @@ private fun HabitApp(context: Context) {
                 )
 
                 AppScreen.STATS -> StatsScreen(habits = activeHabits, statuses = statuses, today = today)
+
+                AppScreen.WEEKLY -> WeeklyReviewScreen(
+                    today = today,
+                    firstWeeklyWeek = firstWeeklyWeek,
+                    reviews = weeklyReviews,
+                    onSave = { review ->
+                        weeklyReviews[review.weekStart] = review
+                        repository.saveWeeklyReviews(weeklyReviews)
+                    }
+                )
 
                 AppScreen.CALENDAR -> CalendarScreen(
                     habits = activeHabits,
@@ -370,7 +426,7 @@ private fun HabitApp(context: Context) {
                         }
                     },
                     onExport = {
-                        pendingBackup = repository.createBackup(habits, statuses, notes, reminderSettings)
+                        pendingBackup = repository.createBackup(habits, statuses, notes, reminderSettings, weeklyReviews)
                         backupMessage = null
                         exportLauncher.launch("nawyki-backup-${LocalDate.now()}.json")
                     },
@@ -435,12 +491,148 @@ private fun HabitApp(context: Context) {
 }
 
 @Composable
+private fun WeeklyReviewScreen(
+    today: LocalDate,
+    firstWeeklyWeek: LocalDate,
+    reviews: Map<String, WeeklyReview>,
+    onSave: (WeeklyReview) -> Unit
+) {
+    val latestWeek = weekStartOf(today)
+    val firstSelection = dueWeekOf(today).let { if (it.isBefore(firstWeeklyWeek)) latestWeek else it }
+    var selectedMonday by remember { mutableStateOf(firstSelection) }
+    val existing = reviews[selectedMonday.toString()]
+    var learned by remember(selectedMonday, existing?.learned) { mutableStateOf(existing?.learned ?: "") }
+    var improved by remember(selectedMonday, existing?.improved) { mutableStateOf(existing?.improved ?: "") }
+    var nextWeek by remember(selectedMonday, existing?.nextWeek) { mutableStateOf(existing?.nextWeek ?: "") }
+    var info by remember(selectedMonday) { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(22.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Twoje 3 pytania", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Zapisuj własne wnioski, bez ocen i presji. Możesz wrócić i zmienić odpowiedzi.", color = Color.LightGray)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    OutlinedButton(onClick = { selectedMonday = selectedMonday.minusWeeks(1) }) {
+                        Text("← Wcześniej")
+                    }
+                    OutlinedButton(
+                        onClick = { selectedMonday = selectedMonday.plusWeeks(1) },
+                        enabled = selectedMonday.isBefore(latestWeek)
+                    ) { Text("Później →") }
+                }
+                Text(weekLabel(selectedMonday), fontWeight = FontWeight.Bold, color = AccentColor)
+                Text(
+                    if (existing?.complete == true) "✓ Podsumowanie gotowe"
+                    else if (existing != null) "W trakcie — uzupełnij brakujące odpowiedzi"
+                    else "Jeszcze bez podsumowania",
+                    color = if (existing?.complete == true) GoodColor else Color.LightGray,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Divider()
+                Text("1. Czego nauczyłem się w tym tygodniu?", fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = learned,
+                    onValueChange = { learned = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Jedna lekcja, obserwacja albo odkrycie…") },
+                    minLines = 3,
+                    maxLines = 6
+                )
+                Text("2. W czym zauważyłem u siebie poprawę?", fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = improved,
+                    onValueChange = { improved = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Nawet mały postęp się liczy…") },
+                    minLines = 3,
+                    maxLines = 6
+                )
+                Text("3. Co chcę zrobić lepiej w następnym tygodniu?", fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = nextWeek,
+                    onValueChange = { nextWeek = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Jedna konkretna rzecz do poprawy…") },
+                    minLines = 3,
+                    maxLines = 6
+                )
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        if (learned.isBlank() && improved.isBlank() && nextWeek.isBlank()) {
+                            info = "Wpisz przynajmniej jedną odpowiedź."
+                        } else {
+                            onSave(
+                                WeeklyReview(
+                                    weekStart = selectedMonday.toString(),
+                                    learned = learned.trim(),
+                                    improved = improved.trim(),
+                                    nextWeek = nextWeek.trim()
+                                )
+                            )
+                            info = if (learned.isNotBlank() && improved.isNotBlank() && nextWeek.isNotBlank())
+                                "Zapisano 3 odpowiedzi ✓" else "Zapisano. Uzupełnij resztę, kiedy będziesz gotowy."
+                        }
+                    }
+                ) { Text("Zapisz podsumowanie") }
+                if (info.isNotEmpty()) Text(info, color = GoodColor)
+            }
+        }
+        Text("Historia tygodni", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        if (reviews.isEmpty()) {
+            Text("Pierwsze podsumowanie pojawi się tutaj po zapisaniu.", color = Color.LightGray)
+        } else {
+            reviews.values.sortedByDescending { it.weekStart }.forEach { review ->
+                val monday = runCatching { LocalDate.parse(review.weekStart) }.getOrNull()
+                if (monday != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { selectedMonday = monday; info = "" },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(weekLabel(monday), fontWeight = FontWeight.Bold)
+                            Text(
+                                if (review.complete) "✓ 3 odpowiedzi" else "W trakcie",
+                                color = if (review.complete) GoodColor else Color.LightGray,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            val preview = review.learned.ifBlank { review.improved.ifBlank { review.nextWeek } }
+                            if (preview.isNotBlank()) Text(preview, maxLines = 2)
+                            Text("Dotknij, żeby zobaczyć lub edytować", style = MaterialTheme.typography.bodySmall, color = AccentColor)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
 private fun HabitsScreen(
     habits: List<Habit>,
     statuses: Map<StatusKey, DailyStatus>,
     today: LocalDate,
     filter: HabitFilter,
     onFilterChange: (HabitFilter) -> Unit,
+    showWeeklyPrompt: Boolean,
+    reviewWeekLabel: String,
+    onOpenWeeklyReview: () -> Unit,
     onStatus: (Habit, DailyStatus) -> Unit,
     onDelete: (Habit) -> Unit,
     onEdit: (Habit) -> Unit
@@ -460,6 +652,24 @@ private fun HabitsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { OverviewHeader(habits = habits, statuses = statuses, today = today) }
+        if (showWeeklyPrompt) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF272238)),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("📝 Czas na refleksję", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(reviewWeekLabel, color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                        Text("3 pytania o to, czego się nauczyłeś, w czym zrobiłeś postęp i co poprawisz.")
+                        Button(onClick = onOpenWeeklyReview) { Text("Podsumuj tydzień") }
+                    }
+                }
+            }
+        }
         item { FilterBar(filter = filter, onFilterChange = onFilterChange) }
 
         if (visibleHabits.isEmpty()) {
@@ -1087,7 +1297,7 @@ private fun SettingsScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Backup danych", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "Eksport zapisuje nawyki, historię, dni tygodnia, archiwum, notatki i ustawienia przypomnień do pliku JSON.",
+                        "Eksport zapisuje nawyki, historię, notatki, podsumowania tygodniowe i ustawienia przypomnień do pliku JSON.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.LightGray
                     )
@@ -1307,6 +1517,16 @@ private fun formatTime(hour: Int, minute: Int): String = "%02d:%02d".format(hour
 private class HabitRepository(context: Context) {
     private val prefs = context.getSharedPreferences("nawyki_data", Context.MODE_PRIVATE)
 
+    // Nową funkcję uruchamiamy od tygodnia aktualizacji: nie pytamy o stare tygodnie.
+    fun loadOrCreateWeeklyStartWeek(): LocalDate {
+        val saved = prefs.getString("weekly_feature_started", null)
+        val parsed = runCatching { LocalDate.parse(saved) }.getOrNull()
+        if (parsed != null) return parsed
+        val monday = weekStartOf(LocalDate.now())
+        prefs.edit().putString("weekly_feature_started", monday.toString()).apply()
+        return monday
+    }
+
     fun loadHabits(): List<Habit> = runCatching {
         habitsFromArray(JSONArray(prefs.getString("habits", "[]") ?: "[]"))
     }.getOrDefault(emptyList())
@@ -1332,6 +1552,15 @@ private class HabitRepository(context: Context) {
         prefs.edit().putString("notes", notesToObject(notes).toString()).apply()
     }
 
+    fun loadWeeklyReviews(): Map<String, WeeklyReview> = runCatching {
+        val raw = prefs.getString("weekly_reviews", "[]") ?: "[]"
+        weeklyReviewsFromArray(JSONArray(raw))
+    }.getOrDefault(emptyMap())
+
+    fun saveWeeklyReviews(reviews: Map<String, WeeklyReview>) {
+        prefs.edit().putString("weekly_reviews", weeklyReviewsToArray(reviews).toString()).apply()
+    }
+
     fun loadReminderSettings(): ReminderSettings = runCatching {
         val raw = prefs.getString("reminder", null) ?: return ReminderSettings()
         reminderFromObject(JSONObject(raw))
@@ -1345,14 +1574,16 @@ private class HabitRepository(context: Context) {
         habits: List<Habit>,
         statuses: Map<StatusKey, DailyStatus>,
         notes: Map<String, String>,
-        reminder: ReminderSettings
+        reminder: ReminderSettings,
+        weeklyReviews: Map<String, WeeklyReview>
     ): String {
         return JSONObject()
-            .put("backupVersion", 4)
+            .put("backupVersion", 5)
             .put("createdAt", LocalDate.now().toString())
             .put("habits", habitsToArray(habits))
             .put("statuses", statusesToArray(statuses))
             .put("notes", notesToObject(notes))
+            .put("weeklyReviews", weeklyReviewsToArray(weeklyReviews))
             .put("reminder", reminderToObject(reminder))
             .toString(2)
     }
@@ -1363,7 +1594,8 @@ private class HabitRepository(context: Context) {
             habits = habitsFromArray(obj.optJSONArray("habits") ?: JSONArray()),
             statuses = statusesFromArray(obj.optJSONArray("statuses") ?: JSONArray()),
             notes = obj.optJSONObject("notes")?.let { notesFromObject(it) } ?: emptyMap(),
-            reminder = obj.optJSONObject("reminder")?.let { reminderFromObject(it) } ?: ReminderSettings()
+            reminder = obj.optJSONObject("reminder")?.let { reminderFromObject(it) } ?: ReminderSettings(),
+            weeklyReviews = weeklyReviewsFromArray(obj.optJSONArray("weeklyReviews") ?: JSONArray())
         )
     }.getOrNull()
 
@@ -1443,6 +1675,32 @@ private class HabitRepository(context: Context) {
             val key = keys.next()
             val value = obj.optString(key, "")
             if (value.isNotBlank()) put(key, value)
+        }
+    }
+
+    private fun weeklyReviewsToArray(reviews: Map<String, WeeklyReview>): JSONArray {
+        val result = JSONArray()
+        reviews.values.sortedBy { it.weekStart }.forEach { review ->
+            result.put(JSONObject()
+                .put("weekStart", review.weekStart)
+                .put("learned", review.learned)
+                .put("improved", review.improved)
+                .put("nextWeek", review.nextWeek))
+        }
+        return result
+    }
+
+    private fun weeklyReviewsFromArray(array: JSONArray): Map<String, WeeklyReview> = buildMap {
+        for (index in 0 until array.length()) {
+            val obj = array.optJSONObject(index) ?: continue
+            val week = obj.optString("weekStart", "")
+            if (runCatching { LocalDate.parse(week) }.isFailure) continue
+            put(week, WeeklyReview(
+                weekStart = week,
+                learned = obj.optString("learned", ""),
+                improved = obj.optString("improved", ""),
+                nextWeek = obj.optString("nextWeek", "")
+            ))
         }
     }
 
